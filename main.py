@@ -17,6 +17,7 @@ if __name__ == "__main__":
     arg_parser.add_argument('--robot_yaw', type=float, default = 0)
     arg_parser.add_argument('--robot_sensor_range', type=float, default = 4)
     arg_parser.add_argument('--robot_sensor_view_angle', type=float, default = 60)
+    arg_parser.add_argument('--output', type=str, default = "waypoints.txt")
     args = arg_parser.parse_args()
 
     pcl_3d = PointCloud3D(read_point_cloud_log("pcl/sas_pc_0.bin", 3, False))
@@ -31,4 +32,9 @@ if __name__ == "__main__":
                   args.robot_sensor_view_angle)
 
     planner = FrontierPlanner(map_grid, robot)
-    planner.plan_full_coverage_path(plot=True)
+    waypoints = planner.get_full_coverage_path(plot=True)
+
+    with open(args.output, "w") as f:
+        for p in waypoints:
+            f.write(",".join([str(v) for v in p]))
+            f.write("\n")

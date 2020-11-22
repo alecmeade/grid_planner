@@ -190,7 +190,7 @@ class FrontierPlanner():
           self.maybe_visit_and_update_frontier([cell])
 
 
-  def plan_full_coverage_path(self, plot: bool = True):
+  def get_full_coverage_path(self, plot: bool = True) -> List[Tuple[float, float, float]]:
     self.coverage_path = [[self.robot.x, self.robot.y, self.robot.yaw]]
     self.grid.reset_visited()
     robot_cell = self.grid.get_cell_from_coords(self.robot.x, self.robot.y)
@@ -267,6 +267,8 @@ class FrontierPlanner():
 
       if plot:
         self.plot()
+
+      return self.coverage_path
 
 
   def plot(self):
