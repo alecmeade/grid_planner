@@ -14,18 +14,13 @@ class OccupancyGrid():
     def __init__(self, pcl_2d: PointCloud2D, resolution: float):
         pcl_2d_data = pcl_2d.data
         self.resolution = resolution
-        self.x_min = np.min(pcl_2d_data[:, 0])
-        self.x_max = np.max(pcl_2d_data[:, 0])
+        self.x_min = np.min(pcl_2d_data[:, 0]) - self.resolution
+        self.x_max = np.max(pcl_2d_data[:, 0]) + self.resolution
         self.cols = int(np.ceil((self.x_max - self.x_min) / self.resolution))
 
-        self.y_min = np.min(pcl_2d_data[:, 1])
-        self.y_max = np.max(pcl_2d_data[:, 1])
+        self.y_min = np.min(pcl_2d_data[:, 1]) - self.resolution
+        self.y_max = np.max(pcl_2d_data[:, 1]) + self.resolution
         self.rows = int(np.ceil((self.y_max - self.y_min) / self.resolution))
-
-        self.x_min = np.min(pcl_2d_data[:, 0]) - (self.resolution / 2.0)
-        self.x_max = np.max(pcl_2d_data[:, 0]) + (self.resolution / 2.0)
-        self.y_min = np.min(pcl_2d_data[:, 1]) - (self.resolution / 2.0)
-        self.y_max = np.max(pcl_2d_data[:, 1]) + (self.resolution / 2.0)
 
         self.grid = []
         self.populate_grid(pcl_2d_data)
@@ -55,8 +50,10 @@ class OccupancyGrid():
 
 
     def get_cell(self, row: int, col: int) -> OccupancyCell:
-      return self.grid[row][col]
+      if self.in_grid_bounds(row, col):
+        return self.grid[row][col]
 
+      return None
 
     def set_occupied(self, cells:  List[OccupancyCell], occupied: bool = True):
       for cell in cells:
@@ -90,9 +87,10 @@ class OccupancyGrid():
       min_col = min(cell_1.col, cell_2.col)
       max_col = max(cell_1.col, cell_2.col)
 
-      for r in range(min_row, max_row):
-        for c in range(min_col, max_col):
+      for r in range(min_row, max_row + 1):
+        for c in range(min_col, max_col + 1):
           cell = self.get_cell(r, c)
+
           if cell.is_occupied and (cell != cell_1) and (cell != cell_2):
             cells.append(cell) 
 
@@ -100,25 +98,62 @@ class OccupancyGrid():
 
 
     def get_cell_from_coords(self, x: float, y: float) -> OccupancyCell:
-      c = int(x - self.x_min / self.resolution)
-      r = int(y - self.y_min / self.resolution)
+      c = int((x - self.x_min) / self.resolution)
+      r = int((y - self.y_min) / self.resolution)
       return self.get_cell(r, c)
     
 
     def is_occluded(self, cell_1: OccupancyCell, cell_2: OccupancyCell) -> bool:
-      slopes = []
+      neighbors = self.get_neighbors(cell_2)
+      point_slopes = [] 
+      distances = []
+
+      for (x1, y1), (x2, y2), (row_offset, col_offset) in cell_2.get_sides():
+        neighbor = self.get_cell(cell_2.row + row_offset, cell_2.col + col_offset)
+        if neighbor is None:
+          continue
+
+        side_centroid_x = (x1 + x2) / 2.0
+        side_centroid_y = (y1 + y2) / 2.0
+        side_distance = utils.euclidean_distance(side_centroid_x, side_centroid_y, cell_1.x, cell_1.y)
+
+        distances.append(side_distance)
+        s1 = utils.safe_slope(cell_1.x, cell_1.y, x1, y1)
+        s2 = utils.safe_slope(cell_1.x, cell_1.y, x2, y2)
+        point_slopes.append([s1, s2, (x1, y1), (x2, y2), not neighbor.is_occupied and neighbor.is_viewable])
+
+      sorted_distances_idx = np.argsort(distances)
+      idx_1 = sorted_distances_idx[0]
+      idx_2 = sorted_distances_idx[-1]
+      free_slopes = []
+      free_points = []
 
 
-      cell_points = np.asarray(cell_2.poly.exterior.coords)
+      if point_slopes[idx_1][4]:
+        free_slopes.append(point_slopes[idx_1][0])
+        free_slopes.append(point_slopes[idx_1][1])
+        free_points.append(point_slopes[idx_1][2])
+        free_points.append(point_slopes[idx_1][3])
 
-      for (x, y) in cell_points:
-          slopes.append(utils.safe_slope(cell_1.x, cell_1.y, x, y))
+      if point_slopes[idx_2][4]:
+        free_slopes.append(point_slopes[idx_2][0])
+        free_slopes.append(point_slopes[idx_2][1])
+        free_points.append(point_slopes[idx_2][2])
+        free_points.append(point_slopes[idx_2][3])
 
-      sorted_slope_idx = np.argsort(slopes)
+      if not len(free_slopes):
+        return False
+
+      sorted_slope_idx = np.argsort(free_slopes)
       idx_1 = sorted_slope_idx[0]
       idx_2 = sorted_slope_idx[-1]
-      seg_1 = geometry.LineString([cell_points[idx_1], (cell_1.x, cell_1.y)])
-      seg_2 = geometry.LineString([cell_points[idx_2], (cell_1.x, cell_1.y)])
+
+      
+      x1, y1 = free_points[idx_1]
+      x2, y2 = free_points[idx_2]
+
+      seg_1 = geometry.LineString([(x1, y1), (cell_1.x, cell_1.y)])
+      seg_2 = geometry.LineString([(x2, y2), (cell_1.x, cell_1.y)])
 
       for cell in self.get_hamming_occupied_cells(cell_1, cell_2):
         if seg_1.intersects(cell.poly) or seg_2.intersects(cell.poly):
@@ -128,9 +163,12 @@ class OccupancyGrid():
 
 
     def plot(self, ax):
-        for r in range(self.rows):
-          for c in range(self.cols):
-            self.get_cell(r, c).plot(ax)
+      for r in range(self.rows):
+        for c in range(self.cols):
+          self.get_cell(r, c).plot(ax)
+
+      ax.set_xlim(self.x_min, self.x_max)
+      ax.set_ylim(self.y_min, self.y_max)
 
 
     def in_grid_bounds(self, row, col):
@@ -185,6 +223,7 @@ class OccupancyGrid():
       for r in range(self.rows):
         for c in range(self.cols):
           cell = self.get_cell(r, c)
+
           if (cell.poly.within(poly) or poly.within(cell.poly)):
             cells.append(cell)
 
@@ -196,7 +235,6 @@ class OccupancyGrid():
       for r in range(self.rows):
         for c in range(self.cols):
           cell = self.get_cell(r, c)
-
           if (poly.overlaps(cell.poly) or cell.poly.within(poly)):
             cells.append(cell)
 

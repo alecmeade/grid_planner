@@ -1,7 +1,9 @@
 import copy
+import heapq
 import math
 import matplotlib.pyplot as plt
 import numpy as np
+import time
 import utils
 from occupancy_grid import OccupancyCell, OccupancyGrid
 from robot import Robot
@@ -16,39 +18,24 @@ class FrontierPlanner():
     self.robot = robot
     self.frontier = {}
     self.coverage_path = []
+    self.rotation_interpolation_step = 10
+    self.top_n_frontier = 5
 
 
-  def get_shortest_path_bfs(self, start: OccupancyCell, goal: OccupancyCell) -> Tuple[List[OccupancyCell], float]:
+  def astar(self, start: OccupancyCell, goal: OccupancyCell) -> Tuple[List[OccupancyCell], float]:
+    if self.is_visible(start, goal):
+      return [start], [start.x_axis_angle(goal)], 0
+
     distances = {}
     path_history = {}
+    path_history[start.key()] = None
+    current_cell = None
+    min_heap = []
+    heapq.heappush(min_heap, [0, 0, 0, start])
 
-    distance = 0
-    path = []
-    angles = []
-
-    current = None
-    if self.is_visible(start, goal):
-      camera_poly = copy.deepcopy(self.robot.camera_poly) 
-      x_offset = goal.x - start.x
-      y_offset = goal.y - start.y
-      camera_poly = affinity.translate(camera_poly, xoff = x_offset, yoff=y_offset)
-      slope = utils.safe_slope(start.x, start.y, goal.x, goal.y)
-      angle = math.degrees(math.atan(slope))
-
-      path = [start]
-      angles = [angle]
-      distance = 0
-      return path, angles, distance
-
-
-
-    queue = [start]
-
-    while len(queue):
-      cell = queue.pop(0)
-
-
-      for n in self.grid.get_neighbors(cell, include_diagonals=True): 
+    while len(min_heap) and current_cell is None:
+      _, _, _, cell = heapq.heappop(min_heap)
+      for n in self.grid.get_neighbors(cell): 
         if n.key() in path_history:
           continue
 
@@ -57,74 +44,121 @@ class FrontierPlanner():
         if (not self.is_collision(n)):
           d = cell.euclidean_distance(n)
           distances[n.key()] = d
-          if self.is_visible(n, goal):
-            current = n
+
+          if d <= self.robot.sensor_range and self.is_visible(n, goal):
+            current_cell = n
+            break
+
+          heapq.heappush(min_heap, (goal.euclidean_distance(n), utils.angular_distance(n.x_axis_angle(goal), self.robot.yaw), np.random.rand(), n))
+
+    path = [current_cell]
+    angles = [current_cell.x_axis_angle(goal)]
+    distance = 0
+
+    while current_cell.key() in path_history and path_history[current_cell.key()] is not None:
+      path.insert(0, current_cell)
+      prev_cell = path_history[current_cell.key()]
+      heading = prev_cell.x_axis_angle(current_cell)
+      distance += distances[current_cell.key()]
+      current_cell = prev_cell
+
+    return path, angles, distance
+
+
+  def bfs(self, start: OccupancyCell, goal: OccupancyCell) -> Tuple[List[OccupancyCell], float]:
+    if self.is_visible(start, goal):
+      return [start], [start.x_axis_angle(goal)], 0
+
+    distances = {}
+    path_history = {}
+    path_history[start.key()] = None
+    current_cell = None
+    queue = [start]
+
+    while len(queue) and current_cell is None:
+      cell = queue.pop(0)
+      for n in self.grid.get_neighbors(cell): 
+        if n.key() in path_history:
+          continue
+
+        path_history[n.key()] = cell
+
+        if ((n.is_visited and not n.is_occupied) or not self.is_collision(n)):
+          d = cell.euclidean_distance(n)
+          distances[n.key()] = d
+
+          if d <= self.robot.sensor_range and self.is_visible(n, goal):
+            current_cell = n
             break
 
           queue.append(n)
 
 
+    path = [current_cell]
+    angles = [current_cell.x_axis_angle(goal)]
+    distance = 0
 
-    camera_poly = copy.deepcopy(self.robot.camera_poly) 
-    x_offset = goal.x - current.x
-    y_offset = goal.y - current.y
-    camera_poly = affinity.translate(camera_poly, xoff = x_offset, yoff=y_offset)
-    slope = utils.safe_slope(current.x, current.y, goal.x, goal.y)
-    angle = math.degrees(math.atan(slope))
-
-    path = [current]
-    angles = [angle]
-
-    while current.key() in path_history:
-      path.insert(0, cell)
-      next_cell = path_history[cell.key()]
-      camera_poly = copy.deepcopy(self.robot.camera_poly) 
-      x_offset = current.x - next_cell.x
-      y_offset = current.y - next_cell.y
-      camera_poly = affinity.translate(camera_poly, xoff = x_offset, yoff=y_offset)
-      
-      slope = utils.safe_slope(next_cell.x, next_cell.y, current.x, current.y)
-      angle = math.degrees(math.atan(slope))
-      angles.insert(0, angle)
-
-      distance += distances[current.key()]
-      cell = path_history[current.key()]
+    while current_cell.key() in path_history and path_history[current_cell.key()] is not None:
+      path.insert(0, current_cell)
+      prev_cell = path_history[current_cell.key()]
+      heading = prev_cell.x_axis_angle(current_cell)
+      distance += distances[current_cell.key()]
+      current_cell = prev_cell
 
     return path, angles, distance
 
 
+  def normals_in_range(self, current: OccupancyCell, goal: OccupancyCell, normal_range: float = 70) -> float:
+    neighbors = self.grid.get_neighbors(goal)
+    point_slopes = [] 
+    distances = []
+
+    min_angle = 360
+    for (x1, y1), (x2, y2), (row_offset, col_offset) in goal.get_sides():
+      neighbor = self.grid.get_cell(goal.row + row_offset, goal.col + col_offset)
+      if neighbor is None:
+        continue
+
+      x3 = (x1 + x2) / 2.0
+      y3 = (y1 + y2) / 2.0
+
+      if not neighbor.is_occupied and neighbor.is_viewable:
+        v1 = (current.x - goal.x, current.y - goal.y)
+        v2 = (x3 - goal.x, y3 - goal.y)
+        dot_product = np.dot(v1 / np.linalg.norm(v1), 
+                             v2 / np.linalg.norm(v2))
+        angle = math.degrees(np.arccos(dot_product))
+        min_angle = min(min_angle, angle)
+
+    return normal_range >= min_angle
+
+
   def is_visible(self, current: OccupancyCell, goal: OccupancyCell) -> bool:
+    if not goal.is_viewable:
+      return False
 
-    camera_poly = copy.deepcopy(self.robot.camera_poly) 
-    x_offset = goal.x - current.x
-    y_offset = goal.y - current.y
-    camera_poly = affinity.translate(camera_poly, xoff = x_offset, yoff=y_offset)
-
-
-    slope = utils.safe_slope(current.x, current.y, goal.x, goal.y)
-    angle = math.degrees(math.atan(slope))
-    camera_poly = affinity.rotate(camera_poly, angle, (current.x, current.y))
-    
-    if camera_poly.overlaps(goal.poly) and not self.grid.is_occluded(current, goal):
+    new_robo = copy.deepcopy(self.robot) 
+    x_offset = current.x - self.robot.x
+    y_offset = current.y - self.robot.y
+    new_robo.translate(current.x, current.y)
+    new_robo.rotate(current.x_axis_angle(goal))
+ 
+    if ((new_robo.camera_poly.overlaps(goal.poly) or goal.poly.within(new_robo.camera_poly)) and
+        not self.grid.is_occluded(current, goal) and 
+        new_robo.in_view(goal.x, goal.y) and
+        self.normals_in_range(current, goal)):
       return True
 
     return False
 
 
-    def get_viewing_angle(self, x: float, y) -> float:
-        return self.get_angle(x, y) - self.yaw
-
-    def in_view(self, view_angle: float) -> bool:
-
-        if abs(view_angle) < (self.sensor_view_angle / 2.0):
-            return True
-
-        return False
-
-
   def is_collision(self, cell: OccupancyCell) -> bool:
+    if cell.is_visited and cell.is_occupied:
+      return True
+
     new_body_poly = geometry.Point(cell.x, cell.y).buffer(self.robot.radius)
     cells = self.grid.get_overlap_cells(new_body_poly)
+
     for cell in cells:
       if (cell.is_visited and cell.is_occupied):
         return True
@@ -134,82 +168,118 @@ class FrontierPlanner():
 
   def maybe_visit_and_update_frontier(self, cells: List[OccupancyCell]):
     for cell in cells:
-      if cell.is_visited:
-        return
+      if cell.is_visited or not cell.is_viewable:
+        continue
 
       cell.is_visited = True
       cell.is_frontier = False
       self.frontier.pop(cell.key(), None)
 
-      for n in self.grid.get_neighbors(cell):
+      for n in self.grid.get_neighbors(cell, include_diagonals = True):
         n_key = n.key()
-        if not n.is_visited and n.is_viewable and n_key not in self.frontier and not n.is_occupied:
+        if (not n.is_visited and 
+            n.is_viewable and 
+            n_key not in self.frontier):
           self.frontier[n_key] = n
           n.is_frontier = True
 
 
+  def observe_cells(self, view_cell, camera_poly):
+      for cell in self.grid.get_overlap_cells(camera_poly):
+        if (not cell.is_visited and self.is_visible(view_cell, cell)):                 
+          self.maybe_visit_and_update_frontier([cell])
+
+
   def plan_full_coverage_path(self, plot: bool = True):
     self.coverage_path = [[self.robot.x, self.robot.y, self.robot.yaw]]
-    robot_cell = self.grid.get_cell_from_coords(self.robot.x, self.robot.y)
     self.grid.reset_visited()
+    robot_cell = self.grid.get_cell_from_coords(self.robot.x, self.robot.y)
+    
     self.grid.mark_viewable_cells(robot_cell)
 
-    start_cells = self.grid.get_within_cells(self.robot.body_poly)
+    start_cells = self.grid.get_overlap_cells(self.robot.body_poly)
     self.maybe_visit_and_update_frontier(start_cells)
-
-    visited_cells = self.grid.get_overlap_cells(self.robot.camera_poly)
-    
-    for cell in visited_cells:
-      view_angle = self.robot.get_viewing_angle(cell.x, cell.y)
-      if (self.robot.in_view(view_angle) and not self.grid.is_occluded(robot_cell, cell)):
-        self.maybe_visit_and_update_frontier([cell])
+    self.observe_cells(robot_cell, self.robot.camera_poly)
 
 
     if plot:
       self.plot()
 
 
+    robot_cell = self.grid.get_cell_from_coords(self.robot.x, self.robot.y)
+
     while len(self.frontier):
-      robot_cell = self.grid.get_cell_from_coords(self.robot.x, self.robot.y)
-      
       goal_path = None
       goal_cell = None
       goal_distance = np.inf
+      goal_rotation = 360
 
+      frontier_distances = []
       for cell in self.frontier.values():
-        path, distance = self.get_shortest_path_bfs(robot_cell, cell)
+        frontier_distances.append([cell.key(), robot_cell.euclidean_distance(cell)])
 
-        if goal_distance > distance:
+      frontier_distances = sorted(frontier_distances, key = lambda x: x[1])
+      n_frontier = min(len(frontier_distances), self.top_n_frontier)
+
+      for i in range(0, n_frontier):        
+        cell = self.frontier[frontier_distances[i][0]]        
+        path, angles, distance = self.astar(robot_cell, cell)
+        rotation = utils.angular_distance(angles[0], self.robot.yaw)
+
+        if (goal_distance > distance) or (goal_distance >= distance and goal_rotation > rotation):
+          goal_rotation = rotation
           goal_distance = distance
           goal_cell = cell
           goal_path = path
 
-        break
 
-      next_cell = path[0]
+      next_cell = goal_path[0]
+      current_heading = self.robot.yaw
+      new_heading = None
 
-      self.robot.rotate(self.robot.get_angle(cell.x, cell.y))    
-      self.robot.translate(next_cell.x, next_cell.y)
-      
 
-      visited_cells = self.grid.get_overlap_cells(self.robot.camera_poly)
-      
-      for cell in visited_cells:
-        view_angle = self.robot.get_viewing_angle(cell.x, cell.y)
-        if (self.robot.in_view(view_angle) and not self.grid.is_occluded(robot_cell, cell)):
-          self.maybe_visit_and_update_frontier([cell])
+      if next_cell.is_visited and next_cell != robot_cell:
+        self.robot.translate(next_cell.x, next_cell.y)
+        current_heading = self.robot.yaw
+        self.observe_cells(robot_cell, self.robot.camera_poly)
+        
+        if plot:
+          self.plot()
+
+      new_heading = utils.wrap_heading(current_heading, self.robot.get_x_axis_angle(goal_cell.x, goal_cell.y))
+
+      if next_cell != robot_cell:
+        new_heading = utils.wrap_heading(current_heading, current_heading + ((new_heading - current_heading) / (len(goal_path) - 1)))
+
+
+      robot_cell = self.grid.get_cell_from_coords(self.robot.x, self.robot.y)
 
       self.coverage_path.append([self.robot.x, self.robot.y, self.robot.yaw])
 
+      for r in np.linspace(current_heading, new_heading, int(abs(current_heading - new_heading) / self.rotation_interpolation_step)):
+        self.robot.rotate(r)  
+        self.observe_cells(robot_cell, self.robot.camera_poly)
+        if plot:
+          self.plot()
+
+      self.observe_cells(robot_cell, self.robot.camera_poly)
+      self.robot.rotate(new_heading)  
+
       if plot:
         self.plot()
-      break
 
 
   def plot(self):
-    f = plt.figure(figsize=(20, 20))
+    f = plt.figure(figsize=(6, 6))
     ax = f.add_subplot(1, 1, 1)
     self.grid.plot(ax)
     self.robot.plot(ax)
-    plt.show()
-
+    if len(self.coverage_path) > 1:
+      for i in range(1, len(self.coverage_path)):
+        x1, y1, _ = self.coverage_path[i - 1]
+        x2, y2, _ = self.coverage_path[i]
+        ax.plot([x1, x2], [y1, y2], color='k')
+    plt.show(block=False)
+    plt.pause(0.1)
+    plt.close()
+    # plt.show()

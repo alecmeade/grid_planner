@@ -17,12 +17,12 @@ class Robot():
         self.sensor_view_angle = sensor_view_angle
         self.sensor_width =  self.sensor_range * (math.tan(math.radians(self.sensor_view_angle / 2.0))) * 2
 
-        yaw_rad = math.radians(yaw)
+        self.yaw_rad = math.radians(yaw)
         self.camera_poly = geometry.Polygon([[self.x, self.y],
-                    [self.x + self.sensor_range * math.cos(yaw_rad) - self.sensor_width * math.sin(yaw_rad) / 2,
-                     self.y + self.sensor_range * math.sin(yaw_rad) + self.sensor_width * math.cos(yaw_rad) / 2],
-                    [self.x + self.sensor_range * math.cos(yaw_rad) + self.sensor_width * math.sin(yaw_rad) / 2,
-                     self.y + self.sensor_range * math.sin(yaw_rad) - self.sensor_width * math.cos(yaw_rad) / 2]])
+                    [self.x + self.sensor_range * math.cos(self.yaw_rad) - self.sensor_width * math.sin(self.yaw_rad) / 2,
+                     self.y + self.sensor_range * math.sin(self.yaw_rad) + self.sensor_width * math.cos(self.yaw_rad) / 2],
+                    [self.x + self.sensor_range * math.cos(self.yaw_rad) + self.sensor_width * math.sin(self.yaw_rad) / 2,
+                     self.y + self.sensor_range * math.sin(self.yaw_rad) - self.sensor_width * math.cos(self.yaw_rad) / 2]])
         self.body_poly = geometry.Point(x, y).buffer(radius)
 
 
@@ -53,8 +53,9 @@ class Robot():
 
 
     def rotate(self, yaw: float):
+        yaw = yaw % 360
         yaw_offset = yaw - self.yaw
-        self.yaw += yaw
+        self.yaw += yaw_offset
         self.yaw_rad = math.radians(yaw)
         self.body_poly = affinity.rotate(self.body_poly, yaw_offset, origin='centroid')
         self.camera_poly = affinity.rotate(self.camera_poly, yaw_offset, (self.x, self.y))
@@ -69,17 +70,22 @@ class Robot():
         self.camera_poly = affinity.translate(self.camera_poly, xoff = x_offset, yoff = y_offset)
 
 
-    def get_angle(self, x: float, y: float) -> float:
-        slope = utils.safe_slope(self.x, self.y, x, y)
-        return math.degrees(math.atan(slope))
+    def get_x_axis_angle(self, x: float, y: float) -> float:
+        return utils.x_axis_angle(self.x, self.y, x, y)
 
 
-    def get_viewing_angle(self, x: float, y) -> float:
-        return self.get_angle(x, y) - self.yaw
+    def get_view_offset_angle(self, x: float, y) -> float:
+        x_axis_angle = self.get_x_axis_angle(x, y)
+        x_axis_angle = utils.wrap_heading(self.yaw, x_axis_angle)
+        return x_axis_angle - self.yaw
 
 
-    def in_view(self, view_angle: float) -> bool:
-        if abs(view_angle) < (self.sensor_view_angle / 2.0):
+    def print(self, prefix: str = "Robot"):
+        print("%s | X: %0.2f | Y: %0.2f | YAW: %0.2f" % (prefix, self.x, self.y, self.yaw))
+
+
+    def in_view(self, x: float, y: float) -> bool:
+        if abs(self.get_view_offset_angle(x, y)) < (self.sensor_view_angle / 2.0):
             return True
 
         return False

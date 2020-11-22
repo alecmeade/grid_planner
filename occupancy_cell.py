@@ -20,7 +20,7 @@ class OccupancyCell():
     self.y_lower = self.y - (self.w / 2.0)
     self.y_upper = self.y + (self.w / 2.0)
 
-    self.poly = geometry.Polygon([(self.x_upper, self.y_upper), 
+    self.poly = geometry.Polygon([(self.x_upper, self.y_upper),  
                                   (self.x_upper, self.y_lower),
                                   (self.x_lower, self.y_lower), 
                                   (self.x_lower, self.y_upper)])
@@ -67,6 +67,13 @@ class OccupancyCell():
     ax.add_patch(rect)
 
 
+  def get_sides(self, eps: float = 0.005) -> List[Tuple[float]]:
+    return [[(self.x_upper, self.y_upper - eps), (self.x_upper, self.y_lower + eps), [0,  1]], # RIGHT
+            [(self.x_upper - eps, self.y_lower), (self.x_lower + eps, self.y_lower), [-1, 0]], # DOWN
+            [(self.x_lower, self.y_lower + eps), (self.x_lower, self.y_upper - eps), [0, -1]], # LEFT
+            [(self.x_lower + eps, self.y_upper), (self.x_upper - eps, self.y_upper), [1,  0]]] # UP
+
+
   def print(self, prefix: str = "Cell"):
     print("%s | Row: %d | Col %d | X: %0.1f | Y: %0.1f | Visit: %d | Occupy: %d | View: %d | Frontier: %d |" % 
           (prefix, self.row, self.col, self.x, self.y, self.is_visited, self.is_occupied, self.is_viewable, self.is_frontier))
@@ -77,9 +84,8 @@ class OccupancyCell():
 
 
   def euclidean_distance(self, cell) -> float:
-    return math.sqrt(((cell.x - self.x)**2) + ((cell.y - self.y)**2))
+    return utils.euclidean_distance(cell.x, cell.y, self.x, self.y)
 
 
   def x_axis_angle(self, cell) -> float:
-      slope = utils.safe_slope(self.x, self.y, x, y)
-      return math.degrees(math.atan(slope))
+      return utils.x_axis_angle(self.x, self.y, cell.x, cell.y)
