@@ -70,12 +70,12 @@ class Robot():
         self.camera_poly = affinity.translate(self.camera_poly, xoff = x_offset, yoff = y_offset)
 
 
-    def get_x_axis_angle(self, x: float, y: float) -> float:
-        return utils.x_axis_angle(self.x, self.y, x, y)
+    def get_z_axis_angle(self, x: float, y: float) -> float:
+        return utils.z_axis_angle(self.x, self.y, x, y)
 
 
     def get_view_offset_angle(self, x: float, y) -> float:
-        x_axis_angle = self.get_x_axis_angle(x, y)
+        x_axis_angle = self.get_z_axis_angle(x, y)
         x_axis_angle = utils.wrap_heading(self.yaw, x_axis_angle)
         return x_axis_angle - self.yaw
 

@@ -19,12 +19,12 @@ class FrontierPlanner():
     self.frontier = {}
     self.coverage_path = []
     self.rotation_interpolation_step = 10
-    self.top_n_frontier = 5
+    self.top_n_frontier = 3
 
 
   def astar(self, start: OccupancyCell, goal: OccupancyCell) -> Tuple[List[OccupancyCell], float]:
     if self.is_visible(start, goal):
-      return [start], [start.x_axis_angle(goal)], 0
+      return [start], [start.z_axis_angle(goal)], 0
 
     distances = {}
     path_history = {}
@@ -49,16 +49,18 @@ class FrontierPlanner():
             current_cell = n
             break
 
-          heapq.heappush(min_heap, (goal.euclidean_distance(n), utils.angular_distance(n.x_axis_angle(goal), self.robot.yaw), np.random.rand(), n))
+          heapq.heappush(min_heap, (goal.euclidean_distance(n), 
+                         utils.angular_distance(n.z_axis_angle(goal), 
+                         self.robot.yaw), np.random.rand(), n))
 
     path = [current_cell]
-    angles = [current_cell.x_axis_angle(goal)]
+    angles = [current_cell.z_axis_angle(goal)]
     distance = 0
 
     while current_cell.key() in path_history and path_history[current_cell.key()] is not None:
       path.insert(0, current_cell)
       prev_cell = path_history[current_cell.key()]
-      heading = prev_cell.x_axis_angle(current_cell)
+      heading = prev_cell.z_axis_angle(current_cell)
       distance += distances[current_cell.key()]
       current_cell = prev_cell
 
@@ -67,7 +69,7 @@ class FrontierPlanner():
 
   def bfs(self, start: OccupancyCell, goal: OccupancyCell) -> Tuple[List[OccupancyCell], float]:
     if self.is_visible(start, goal):
-      return [start], [start.x_axis_angle(goal)], 0
+      return [start], [start.z_axis_angle(goal)], 0
 
     distances = {}
     path_history = {}
@@ -95,13 +97,13 @@ class FrontierPlanner():
 
 
     path = [current_cell]
-    angles = [current_cell.x_axis_angle(goal)]
+    angles = [current_cell.z_axis_angle(goal)]
     distance = 0
 
     while current_cell.key() in path_history and path_history[current_cell.key()] is not None:
       path.insert(0, current_cell)
       prev_cell = path_history[current_cell.key()]
-      heading = prev_cell.x_axis_angle(current_cell)
+      heading = prev_cell.z_axis_angle(current_cell)
       distance += distances[current_cell.key()]
       current_cell = prev_cell
 
@@ -141,7 +143,7 @@ class FrontierPlanner():
     x_offset = current.x - self.robot.x
     y_offset = current.y - self.robot.y
     new_robo.translate(current.x, current.y)
-    new_robo.rotate(current.x_axis_angle(goal))
+    new_robo.rotate(current.z_axis_angle(goal))
  
     if ((new_robo.camera_poly.overlaps(goal.poly) or goal.poly.within(new_robo.camera_poly)) and
         not self.grid.is_occluded(current, goal) and 
@@ -246,7 +248,7 @@ class FrontierPlanner():
         if plot:
           self.plot()
 
-      new_heading = utils.wrap_heading(current_heading, self.robot.get_x_axis_angle(goal_cell.x, goal_cell.y))
+      new_heading = utils.wrap_heading(current_heading, self.robot.get_z_axis_angle(goal_cell.x, goal_cell.y))
 
       if next_cell != robot_cell:
         new_heading = utils.wrap_heading(current_heading, current_heading + ((new_heading - current_heading) / (len(goal_path) - 1)))
@@ -268,11 +270,11 @@ class FrontierPlanner():
       if plot:
         self.plot()
 
-      return self.coverage_path
+    return self.coverage_path
 
 
   def plot(self):
-    f = plt.figure(figsize=(6, 6))
+    f = plt.figure(figsize=(9, 9))
     ax = f.add_subplot(1, 1, 1)
     self.grid.plot(ax)
     self.robot.plot(ax)
@@ -284,4 +286,3 @@ class FrontierPlanner():
     plt.show(block=False)
     plt.pause(0.1)
     plt.close()
-    # plt.show()

@@ -87,5 +87,5 @@ class OccupancyCell():
     return utils.euclidean_distance(cell.x, cell.y, self.x, self.y)
 
 
-  def x_axis_angle(self, cell) -> float:
-      return utils.x_axis_angle(self.x, self.y, cell.x, cell.y)
+  def z_axis_angle(self, cell) -> float:
+      return utils.z_axis_angle(self.x, self.y, cell.x, cell.y)
