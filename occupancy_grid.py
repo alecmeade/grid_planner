@@ -14,6 +14,10 @@ class OccupancyGrid():
     def __init__(self, pcl_2d: PointCloud2D, resolution: float):
         pcl_2d_data = pcl_2d.data
         self.resolution = resolution
+
+        # The number of rows and columns are determined by the resolution. Similarly
+        # the boundaries of the grid are buffered with the resolution to ensure that
+        # all points are contained and accounted for.
         self.x_min = np.min(pcl_2d_data[:, 0]) - self.resolution
         self.x_max = np.max(pcl_2d_data[:, 0]) + self.resolution
         self.cols = int(np.ceil((self.x_max - self.x_min) / self.resolution))
@@ -27,14 +31,21 @@ class OccupancyGrid():
 
 
     def populate_grid(self, pcl_2d_data: np.ndarray):
+      """Accepts a list of 2D points and discretizes them into a 2D grid using the provided resolutions
+      set in the class constructor."""
       for r in range(self.rows):
         self.grid.append([])
         for c in range(self.cols):
+
+            # Each grid cell is a 2D rectangle.
             x_lower = self.x_min + c * self.resolution
             x_upper = self.x_min + (c + 1) * self.resolution
             y_lower = self.y_min + r * self.resolution
             y_upper = self.y_min + (r + 1) * self.resolution
 
+
+            # If there exist point cloud points within the boundaries of the cell then it is marked
+            # as occupied.
             x_points = np.logical_and(pcl_2d_data[:, 0] > x_lower, 
                                       pcl_2d_data[:, 0] <= x_upper)
             y_points = np.logical_and(pcl_2d_data[:, 1] > y_lower, 
@@ -50,37 +61,26 @@ class OccupancyGrid():
 
 
     def get_cell(self, row: int, col: int) -> OccupancyCell:
+      """Retrieves a reference to a grid cell."""
       if self.in_grid_bounds(row, col):
         return self.grid[row][col]
 
       return None
 
     def set_occupied(self, cells:  List[OccupancyCell], occupied: bool = True):
+      """Sets the occupancy state of a list of grid cells."""
       for cell in cells:
        cell.is_occupied = occupied
 
 
     def set_visited(self, cells:  List[OccupancyCell], visited: bool = True):
+      """Sets the is visited state of a list of grid cells."""
       for cell in cells:
        cell.is_visited = True
 
 
-    def all_visited(self) -> bool:
-      for r in range(self.rows):
-        for c in range(self.cols):
-          if not self.get_cell(r, c).is_occupied:
-            return False
-
-      return True
-
-
-    def reset_visited(self, visited: bool = False) -> bool:
-      for r in range(self.rows):
-        for c in range(self.cols):
-          self.get_cell(r, c).is_visited = visited
-
-
     def get_hamming_occupied_cells(self, cell_1: OccupancyCell, cell_2: OccupancyCell) -> List[OccupancyCell]:
+      """Gets all cells within a rectangular bounded region between cell_1 and cell_2 but also exlcuding them."""
       cells = []
       min_row = min(cell_1.row, cell_2.row)
       max_row = max(cell_1.row, cell_2.row)
@@ -98,12 +98,15 @@ class OccupancyGrid():
 
 
     def get_cell_from_coords(self, x: float, y: float) -> OccupancyCell:
+      """Gets the cell from the grid containing the corresponding x, y point."""
       c = int((x - self.x_min) / self.resolution)
       r = int((y - self.y_min) / self.resolution)
       return self.get_cell(r, c)
     
 
     def is_occluded(self, cell_1: OccupancyCell, cell_2: OccupancyCell) -> bool:
+      """Determines whether cell_2 is occluded when observing it from cell_1."""
+
       neighbors = self.get_neighbors(cell_2)
       point_slopes = [] 
       distances = []
@@ -113,15 +116,21 @@ class OccupancyGrid():
         if neighbor is None:
           continue
 
+        # Determines the distance from the centroid of an edge of cell_2 to the center of cell_1.
         side_centroid_x = (x1 + x2) / 2.0
         side_centroid_y = (y1 + y2) / 2.0
         side_distance = utils.euclidean_distance(side_centroid_x, side_centroid_y, cell_1.x, cell_1.y)
-
         distances.append(side_distance)
+
+        # Calculates the slopes between the corners of the side and the center of cell_1.
         s1 = utils.safe_slope(cell_1.x, cell_1.y, x1, y1)
         s2 = utils.safe_slope(cell_1.x, cell_1.y, x2, y2)
         point_slopes.append([s1, s2, (x1, y1), (x2, y2), not neighbor.is_occupied and neighbor.is_viewable])
 
+
+      # Identifies the two lines between corners connected to oncuppied edges of cell_2 and the center of cell_1
+      # that maximize the area of the polygon formed by connecting the points. This is to ensure that we check
+      # for full occlusion.
       sorted_distances_idx = np.argsort(distances)
       idx_1 = sorted_distances_idx[0]
       idx_2 = sorted_distances_idx[-1]
@@ -129,6 +138,7 @@ class OccupancyGrid():
       free_points = []
 
 
+      # Determines which edges have oncuppied neighbors to identify the area required for viewing.
       if point_slopes[idx_1][4]:
         free_slopes.append(point_slopes[idx_1][0])
         free_slopes.append(point_slopes[idx_1][1])
@@ -144,6 +154,8 @@ class OccupancyGrid():
       if not len(free_slopes):
         return False
 
+      # Now that the continous and oncuppied edges are identified we redraw the largest possible polygon
+      # between the identified cell_2 corners and the center of cell_1.
       sorted_slope_idx = np.argsort(free_slopes)
       idx_1 = sorted_slope_idx[0]
       idx_2 = sorted_slope_idx[-1]
@@ -155,6 +167,9 @@ class OccupancyGrid():
       seg_1 = geometry.LineString([(x1, y1), (cell_1.x, cell_1.y)])
       seg_2 = geometry.LineString([(x2, y2), (cell_1.x, cell_1.y)])
 
+
+      # Any occupied cells that intersect the lines / polygon drawn between the corners of cell_2 and the center
+      # of cell_1 represent that cell_2 is occluded.
       for cell in self.get_hamming_occupied_cells(cell_1, cell_2):
         if seg_1.intersects(cell.poly) or seg_2.intersects(cell.poly):
           return True
@@ -163,6 +178,7 @@ class OccupancyGrid():
 
 
     def plot(self, ax):
+      """Plots all cells within the grid on a provided set of axeses"""
       for r in range(self.rows):
         for c in range(self.cols):
           self.get_cell(r, c).plot(ax)
@@ -172,6 +188,9 @@ class OccupancyGrid():
 
 
     def in_grid_bounds(self, row, col):
+      """Determines whether a given row and col location is within the boundaries
+      of the grid."""
+
       def in_bounds(v: float, v_min: float, v_max: float) -> bool:
         return ((v <= v_max) and (v >= v_min))
 
@@ -183,7 +202,9 @@ class OccupancyGrid():
                       filter_occupied: bool = False, 
                       filter_visited: bool = False,
                       filter_viewable: bool = False):
-
+      """Gets all neighbors of the provided cell. Horizontal neighbors are included by default
+      but diagonal neighbors can be added. Additionally, numerous filters can be applied to
+      the neighbors to determine the relevant set of nearby cells."""
       horizontal_dirs = [
         [ 1,  0], # UP
         [ 0,  1], # RIGHT
@@ -198,6 +219,7 @@ class OccupancyGrid():
         [ 1, -1]  # UP LEFT
       ]
 
+      # Maybe account for diagonal neighbors.
       dirs = horizontal_dirs + diagonal_dirs if include_diagonals else horizontal_dirs
 
       neighbors = []
@@ -208,6 +230,7 @@ class OccupancyGrid():
         if self.in_grid_bounds(r_new, c_new):
           neighbor = self.get_cell(r_new, c_new)
 
+          # Apply neighbor filters.
           if ((filter_occupied and neighbor.is_occupied) or 
               (filter_visited and neighbor.is_visited) or
               (filter_viewable and neighbor.is_viewable)):
@@ -219,6 +242,7 @@ class OccupancyGrid():
 
 
     def get_within_cells(self, poly: geometry.Polygon) -> List[OccupancyCell]:
+      """Determines which cells are contained by or contain the provided polygon."""
       cells = []
       for r in range(self.rows):
         for c in range(self.cols):
@@ -231,6 +255,9 @@ class OccupancyGrid():
 
 
     def get_overlap_cells(self, poly: geometry.Polygon) -> List[OccupancyCell]:
+      """Determines which cells in the grid intersect the provided polygon. This will return no
+      cells if the polygon is smaller then a single cell and contained within it."""
+
       cells = []
       for r in range(self.rows):
         for c in range(self.cols):
@@ -241,8 +268,27 @@ class OccupancyGrid():
       return cells
 
 
-    def mark_viewable_cells(self, start: OccupancyCell):
+    def print_coverage(self):
+      """Prints the number of viewed or visited cells within the map at a given
+      point in time versus the total number of viewable cells."""
+      total = 0
+      viewed = 0
+      for r in range(self.rows):
+        for c in range(self.cols):
+          cell = self.get_cell(r, c)
+          if cell.is_viewable:
+            total += 1
+          if cell.is_visited:
+            viewed += 1
+      print("Coverage %d / %d" % (viewed, total))
 
+
+    def mark_viewable_cells(self, start: OccupancyCell):
+      """Traverses the grid using BFS starting at the provided start cell and determines which cells
+      are physically accessible or connected and not blocked by occupied cells. This does not take into
+      account the size of the robot or object trying to traverse the pass, but merely determines if a path
+      exists however big or small. This is used to initialize the map to determine when the goal state of full
+      coverage is complete."""
       for r in range(self.rows):
         for c in range(self.cols):
           self.get_cell(r, c).is_viewable = False

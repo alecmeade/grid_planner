@@ -18,6 +18,8 @@ class Robot():
         self.sensor_width =  self.sensor_range * (math.tan(math.radians(self.sensor_view_angle / 2.0))) * 2
 
         self.yaw_rad = math.radians(yaw)
+
+        # Define a triangular polygon representing the camera view and centered on the robot center.
         self.camera_poly = geometry.Polygon([[self.x, self.y],
                     [self.x + self.sensor_range * math.cos(self.yaw_rad) - self.sensor_width * math.sin(self.yaw_rad) / 2,
                      self.y + self.sensor_range * math.sin(self.yaw_rad) + self.sensor_width * math.cos(self.yaw_rad) / 2],
@@ -27,6 +29,8 @@ class Robot():
 
 
     def plot(self, ax):
+        """Plot the current state of the robot on an existing set of matplotlib axes.
+        The robot location, sensor and heading are all reflected in the plot."""
         rect = patches.Circle((self.x, self.y),
                                self.radius,
                                linewidth = 2,
@@ -53,6 +57,7 @@ class Robot():
 
 
     def rotate(self, yaw: float):
+        """Rotates the robot and camera polygons counter-clockwise about the z-axis."""
         yaw = yaw % 360
         yaw_offset = yaw - self.yaw
         self.yaw += yaw_offset
@@ -62,6 +67,7 @@ class Robot():
 
 
     def translate(self, x: float, y: float):
+        """Translates the robot body and camera polygons to the provided x, y location."""
         x_offset = x - self.x
         y_offset = y - self.y
         self.x += x_offset
@@ -71,20 +77,28 @@ class Robot():
 
 
     def get_z_axis_angle(self, x: float, y: float) -> float:
+        """Calculates the angle about the z-axis formed between the robot's current location
+        and the provided x, y point."""
         return utils.z_axis_angle(self.x, self.y, x, y)
 
 
     def get_view_offset_angle(self, x: float, y) -> float:
+        """
+
+        """
         x_axis_angle = self.get_z_axis_angle(x, y)
         x_axis_angle = utils.wrap_heading(self.yaw, x_axis_angle)
         return x_axis_angle - self.yaw
 
 
     def print(self, prefix: str = "Robot"):
+        """Summarizes the Robot state and prints it to standard out."""
         print("%s | X: %0.2f | Y: %0.2f | YAW: %0.2f" % (prefix, self.x, self.y, self.yaw))
 
 
     def in_view(self, x: float, y: float) -> bool:
+        """Determines whether a provided x, y location is within the robots angular field of view. 
+        This function does not check for intersection with the camera sensor polygon."""
         if abs(self.get_view_offset_angle(x, y)) < (self.sensor_view_angle / 2.0):
             return True
 

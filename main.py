@@ -8,16 +8,18 @@ from robot import Robot
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument('--pcl_path', type=str, default = "pcl/sas_pc_0.bin")
-    arg_parser.add_argument('--grid_resolution', type=int, default = 0.5)
+    arg_parser.add_argument('--grid_resolution', type=int, default = 0.8)
     arg_parser.add_argument('--z_min', type=float, default = 0.5)
     arg_parser.add_argument('--z_max', type=float, default = 0.6)
     arg_parser.add_argument('--start_x', type=int, default = 0)
     arg_parser.add_argument('--start_y', type=int, default = 0)
-    arg_parser.add_argument('--robot_radius', type=float, default = 0.5)
+    arg_parser.add_argument('--robot_radius', type=float, default = 0.8)
     arg_parser.add_argument('--robot_yaw', type=float, default = 0)
-    arg_parser.add_argument('--robot_sensor_range', type=float, default = 10)
-    arg_parser.add_argument('--robot_sensor_view_angle', type=float, default = 85.2)
+    arg_parser.add_argument('--robot_sensor_range', type=float, default = 7)
+    arg_parser.add_argument('--robot_sensor_view_angle', type=float, default = 60)
+    arg_parser.add_argument('--wall_obseration_angle', type=float, default = 70)
     arg_parser.add_argument('--output', type=str, default = "waypoints.txt")
+    arg_parser.add_argument('--show_plot', type=bool, default = True)
     args = arg_parser.parse_args()
 
     # Transform the provided 3D point cloud to a 2D grid representation.
@@ -33,11 +35,12 @@ if __name__ == "__main__":
                   args.robot_sensor_view_angle)
 
     # Plan a full coverage path for the robot to explore the gridworld.
-    planner = FrontierPlanner(map_grid, robot)
-    waypoints = planner.get_full_coverage_path(plot=True)
+    planner = FrontierPlanner(map_grid, robot, args.wall_obseration_angle, args.show_plot)
+    waypoints = planner.get_full_coverage_path()
 
     # Write the planned waypoints out to a file for later use.
     with open(args.output, "w") as f:
         for p in waypoints:
             f.write(",".join([str(v) for v in p]))
             f.write("\n")
+
