@@ -13,3 +13,7 @@ A video demo of the grid planner code running can be found here.
 https://drive.google.com/file/d/1P-0FvcL454sZbnoOzVRJzHNoTNxpMzBT/view?usp=sharing
 
 
+## Writeup
+
+The writeup of the term project and results that this code was used in can be found here.
+https://drive.google.com/file/d/1AbfM8XJMGBp9qH_0qX-y5AOLkJcosEns/view?usp=sharing
